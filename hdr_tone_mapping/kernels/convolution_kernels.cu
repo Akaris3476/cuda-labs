@@ -182,4 +182,212 @@ namespace cuda_filter
         delete[] h_kernel;
     }
 
+
+
+
+    __device__ inline float gpu_lerp(float a, float b, float t) {
+        return a + t * (b - a);
+    }
+
+    __global__ void hdrGlobalKernel(const unsigned char *input, unsigned char *output,
+                                    int width, int height, int channels,
+                                    float exposure, float gamma, float saturation)
+    {
+        int x = blockIdx.x * blockDim.x + threadIdx.x;
+        int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+        if (x >= width || y >= height) return;
+
+        int idx = (y * width + x) * channels;
+
+        float b = (input[idx + 0] / 255.0f) * exposure;
+        float g = (input[idx + 1] / 255.0f) * exposure;
+        float r = (input[idx + 2] / 255.0f) * exposure;
+
+        float Y = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+        float Y_mapped = Y / (1.0f + Y);
+
+        float b_out = (Y > 0.0f) ? (b / Y) * Y_mapped : 0.0f;
+        float g_out = (Y > 0.0f) ? (g / Y) * Y_mapped : 0.0f;
+        float r_out = (Y > 0.0f) ? (r / Y) * Y_mapped : 0.0f;
+
+        b_out = gpu_lerp(Y_mapped, b_out, saturation);
+        g_out = gpu_lerp(Y_mapped, g_out, saturation);
+        r_out = gpu_lerp(Y_mapped, r_out, saturation);
+
+        b_out = powf(max(0.0f, b_out), 1.0f / gamma);
+        g_out = powf(max(0.0f, g_out), 1.0f / gamma);
+        r_out = powf(max(0.0f, r_out), 1.0f / gamma);
+
+        output[idx + 0] = static_cast<unsigned char>(min(max(b_out * 255.0f, 0.0f), 255.0f));
+        output[idx + 1] = static_cast<unsigned char>(min(max(g_out * 255.0f, 0.0f), 255.0f));
+        output[idx + 2] = static_cast<unsigned char>(min(max(r_out * 255.0f, 0.0f), 255.0f));
+
+        if (channels == 4) {
+            output[idx + 3] = input[idx + 3];
+        }
+    }
+
+    constexpr int TILE_SIZE = 16;
+    constexpr int RAD = 2;
+    constexpr int SH_SZ = (TILE_SIZE + 2 * RAD);
+
+    __global__ void hdrLocalKernel(const unsigned char *input, unsigned char *output,
+                                   int width, int height, int channels,
+                                   float exposure, float gamma, float saturation)
+    {
+        __shared__ float s_Y[SH_SZ][SH_SZ];
+
+        int tx = threadIdx.x;
+        int ty = threadIdx.y;
+        int x = blockIdx.x * TILE_SIZE + tx;
+        int y = blockIdx.y * TILE_SIZE + ty;
+
+        int shared_y = ty;
+        while (shared_y < SH_SZ) {
+            int shared_x = tx;
+            while (shared_x < SH_SZ) {
+                int in_x = min(max(static_cast<int>(blockIdx.x * TILE_SIZE + shared_x - RAD), 0), width - 1);
+                int in_y = min(max(static_cast<int>(blockIdx.y * TILE_SIZE + shared_y - RAD), 0), height - 1);
+
+                int src_idx = (in_y * width + in_x) * channels;
+                float b_sh = input[src_idx + 0] / 255.0f;
+                float g_sh = input[src_idx + 1] / 255.0f;
+                float r_sh = input[src_idx + 2] / 255.0f;
+
+                s_Y[shared_y][shared_x] = 0.2126f * r_sh + 0.7152f * g_sh + 0.0722f * b_sh;
+
+                shared_x += TILE_SIZE;
+            }
+            shared_y += TILE_SIZE;
+        }
+        __syncthreads();
+
+        if (x >= width || y >= height) return;
+
+        int idx = (y * width + x) * channels;
+        float b = (input[idx + 0] / 255.0f) * exposure;
+        float g = (input[idx + 1] / 255.0f) * exposure;
+        float r = (input[idx + 2] / 255.0f) * exposure;
+        float Y = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+
+        float Y_local_sum = 0.0f;
+        for (int ky = 0; ky <= 2 * RAD; ++ky) {
+            for (int kx = 0; kx <= 2 * RAD; ++kx) {
+                Y_local_sum += s_Y[ty + ky][tx + kx];
+            }
+        }
+        float Y_local_avg = Y_local_sum / ((2 * RAD + 1) * (2 * RAD + 1));
+
+        float Y_mapped = Y / (1.0f + Y_local_avg);
+
+        float b_out = (Y > 0.0f) ? (b / Y) * Y_mapped : 0.0f;
+        float g_out = (Y > 0.0f) ? (g / Y) * Y_mapped : 0.0f;
+        float r_out = (Y > 0.0f) ? (r / Y) * Y_mapped : 0.0f;
+
+        b_out = gpu_lerp(Y_mapped, b_out, saturation);
+        g_out = gpu_lerp(Y_mapped, g_out, saturation);
+        r_out = gpu_lerp(Y_mapped, r_out, saturation);
+
+        b_out = powf(max(0.0f, b_out), 1.0f / gamma);
+        g_out = powf(max(0.0f, g_out), 1.0f / gamma);
+        r_out = powf(max(0.0f, r_out), 1.0f / gamma);
+
+        output[idx + 0] = static_cast<unsigned char>(min(max(b_out * 255.0f, 0.0f), 255.0f));
+        output[idx + 1] = static_cast<unsigned char>(min(max(g_out * 255.0f, 0.0f), 255.0f));
+        output[idx + 2] = static_cast<unsigned char>(min(max(r_out * 255.0f, 0.0f), 255.0f));
+
+        if (channels == 4) {
+            output[idx + 3] = input[idx + 3];
+        }
+    }
+    void applyHDRToneMappingGPU(const cv::Mat &input, cv::Mat &output,
+                                float exposure, float gamma, float saturation, bool use_local)
+    {
+        if (input.empty()) return;
+        output.create(input.size(), input.type());
+
+        int width = input.cols;
+        int height = input.rows;
+        int channels = input.channels();
+
+        size_t imageSize = width * height * channels * sizeof(unsigned char);
+
+        unsigned char *d_input = nullptr;
+        unsigned char *d_output = nullptr;
+
+        CHECK_CUDA_ERROR(cudaMalloc(&d_input, imageSize));
+        CHECK_CUDA_ERROR(cudaMalloc(&d_output, imageSize));
+
+        CHECK_CUDA_ERROR(cudaMemcpy(d_input, input.data, imageSize, cudaMemcpyHostToDevice));
+
+        dim3 blockDim(16, 16);
+        dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
+
+        if (use_local) {
+            hdrLocalKernel<<<gridDim, blockDim>>>(d_input, d_output, width, height, channels, exposure, gamma, saturation);
+        } else {
+            hdrGlobalKernel<<<gridDim, blockDim>>>(d_input, d_output, width, height, channels, exposure, gamma, saturation);
+        }
+
+        CHECK_CUDA_ERROR(cudaGetLastError());
+        CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+        CHECK_CUDA_ERROR(cudaMemcpy(output.data, d_output, imageSize, cudaMemcpyDeviceToHost));
+
+        cudaFree(d_input);
+        cudaFree(d_output);
+    }
+
+    void applyHDRToneMappingCPU(const cv::Mat &input, cv::Mat &output,
+                                float exposure, float gamma, float saturation)
+    {
+        if (input.empty()) return;
+        output.create(input.size(), input.type());
+
+        int width = input.cols;
+        int height = input.rows;
+        int channels = input.channels();
+
+        for (int y = 0; y < height; y++)
+        {
+            const unsigned char* in_row = input.ptr<unsigned char>(y);
+            unsigned char* out_row = output.ptr<unsigned char>(y);
+
+            for (int x = 0; x < width; x++)
+            {
+                int idx = x * channels;
+
+                float b = (in_row[idx + 0] / 255.0f) * exposure;
+                float g = (in_row[idx + 1] / 255.0f) * exposure;
+                float r = (in_row[idx + 2] / 255.0f) * exposure;
+
+                float Y = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                float Y_mapped = Y / (1.0f + Y);
+
+                float b_out = (Y > 0.0f) ? (b / Y) * Y_mapped : 0.0f;
+                float g_out = (Y > 0.0f) ? (g / Y) * Y_mapped : 0.0f;
+                float r_out = (Y > 0.0f) ? (r / Y) * Y_mapped : 0.0f;
+
+                b_out = Y_mapped + saturation * (b_out - Y_mapped);
+                g_out = Y_mapped + saturation * (g_out - Y_mapped);
+                r_out = Y_mapped + saturation * (r_out - Y_mapped);
+
+                b_out = std::pow(std::max(0.0f, b_out), 1.0f / gamma);
+                g_out = std::pow(std::max(0.0f, g_out), 1.0f / gamma);
+                r_out = std::pow(std::max(0.0f, r_out), 1.0f / gamma);
+
+                out_row[idx + 0] = static_cast<unsigned char>(std::min(std::max(b_out * 255.0f, 0.0f), 255.0f));
+                out_row[idx + 1] = static_cast<unsigned char>(std::min(std::max(g_out * 255.0f, 0.0f), 255.0f));
+                out_row[idx + 2] = static_cast<unsigned char>(std::min(std::max(r_out * 255.0f, 0.0f), 255.0f));
+
+                if (channels == 4) {
+                    out_row[idx + 3] = in_row[idx + 3];
+                }
+            }
+        }
+    }
+
+
+
 } // namespace cuda_filter

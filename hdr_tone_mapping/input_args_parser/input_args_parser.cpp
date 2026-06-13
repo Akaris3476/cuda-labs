@@ -77,6 +77,11 @@ namespace cuda_filter
         filterOptions.intensity = result["intensity"].as<float>();
         filterOptions.preview = result.count("preview") > 0;
 
+        filterOptions.exposure = result["exposure"].as<float>();
+        filterOptions.gamma = result["gamma"].as<float>();
+        filterOptions.saturation = result["saturation"].as<float>();
+        filterOptions.useLocal = result.count("local") > 0;
+
         return filterOptions;
     }
 
@@ -85,7 +90,10 @@ namespace cuda_filter
         options.add_options()("i,input", "Input source: 'webcam', 'image', 'video', or 'synthetic'",
                               cxxopts::value<std::string>()->default_value("webcam"))("p,path", "Path to input image or video file (when not using webcam)",
                                                                                       cxxopts::value<std::string>()->default_value("test_image.jpg"))("s,synthetic", "Synthetic pattern type: 'checkerboard', 'gradient', 'noise'",
-                                                                                                                                                      cxxopts::value<std::string>()->default_value("checkerboard"))("d,device", "Camera device ID", cxxopts::value<int>()->default_value("0"))("f,filter", "Filter type: blur, sharpen, edge, emboss", cxxopts::value<std::string>()->default_value("blur"))("k,kernel-size", "Kernel size for filters", cxxopts::value<int>()->default_value("3"))("sigma", "Sigma value for Gaussian blur", cxxopts::value<float>()->default_value("1.0"))("intensity", "Filter intensity", cxxopts::value<float>()->default_value("1.0"))("preview", "Show original video alongside filtered")("h,help", "Print usage")("v,version", "Print version information");
+                                                                                                                                                      cxxopts::value<std::string>()->default_value("checkerboard"))("d,device", "Camera device ID", cxxopts::value<int>()->default_value("0"))("f,filter", "Filter type: blur, sharpen, edge, emboss", cxxopts::value<std::string>()->default_value("blur"))("k,kernel-size", "Kernel size for filters", cxxopts::value<int>()->default_value("3"))("sigma", "Sigma value for Gaussian blur", cxxopts::value<float>()->default_value("1.0"))("intensity", "Filter intensity", cxxopts::value<float>()->default_value("1.0"))("preview", "Show original video alongside filtered")("e,exposure", "Exposure value for HDR tone mapping", cxxopts::value<float>()->default_value("1.5"))
+            ("g,gamma", "Gamma correction value", cxxopts::value<float>()->default_value("2.2"))
+            ("saturation", "Color saturation value", cxxopts::value<float>()->default_value("1.2"))
+            ("l,local", "Use local tone mapping operator instead of global")("h,help", "Print usage")("v,version", "Print version information");
     }
 
 } // namespace cuda_filter

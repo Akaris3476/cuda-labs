@@ -12,7 +12,8 @@ namespace cuda_filter
         SHARPEN,
         EDGE_DETECTION,
         EMBOSS,
-        IDENTITY
+        IDENTITY,
+        HDR_TONEMAPPING
     };
 
     class FilterUtils
@@ -24,4 +25,4 @@ namespace cuda_filter
         static void applyFilterCPU(const cv::Mat &input, cv::Mat &output, const cv::Mat &kernel);
     };
 
-} // namespace cuda_filter
+}

@@ -18,12 +18,20 @@ int main(int argc, char **argv)
     cuda_filter::FilterOptions options = parser.parseArgs();
 
     // Initialize input handler
-    cuda_filter::InputHandler inputHandler(options);
-    if (!inputHandler.isOpened())
+    // cuda_filter::InputHandler inputHandler(options);
+    // if (!inputHandler.isOpened())
+    // {
+    //     PLOG_ERROR << "Failed to initialize input source";
+    //     return -1;
+    // }
+
+    cv::Mat frame = cv::imread(options.inputPath, cv::IMREAD_COLOR);
+    if (frame.empty())
     {
-        PLOG_ERROR << "Failed to initialize input source";
+        PLOG_ERROR << "Failed to read input image from path: " << options.inputPath;
         return -1;
     }
+
 
     // Create filter kernel
     cuda_filter::FilterType filterType = cuda_filter::FilterUtils::stringToFilterType(options.filterType);
@@ -34,26 +42,37 @@ int main(int argc, char **argv)
               << ", Kernel size: " << options.kernelSize
               << ", Intensity: " << options.intensity;
 
-    cv::Mat frame, filteredCPU, filteredGPU;
+    cv::Mat filteredCPU, filteredGPU;
     double fpsCPU = 0.0, fpsGPU = 0.0;
     int frameCountCPU = 0, frameCountGPU = 0;
     double startTimeCPU = static_cast<double>(cv::getTickCount());
     double startTimeGPU = static_cast<double>(cv::getTickCount());
 
+    float exposure = options.exposure ;
+    float gamma = options.gamma;
+    float saturation = options.saturation;
+    bool use_local = options.useLocal;
+
     PLOG_INFO << "Press 'ESC' to exit";
 
-    while (true)
-    {
+
         // Capture frame
-        if (!inputHandler.readFrame(frame))
-        {
-            PLOG_ERROR << "Failed to read frame";
-            break;
-        }
+        // if (!inputHandler.readFrame(frame))
+        // {
+        //     PLOG_ERROR << "Failed to read frame";
+        //     break;
+        // }
 
         // Apply filter using CPU
         const double cpuStart = static_cast<double>(cv::getTickCount());
-        cuda_filter::applyFilterCPU(frame, filteredCPU, kernel);
+        if (filterType == cuda_filter::FilterType::HDR_TONEMAPPING)
+        {
+            cuda_filter::applyHDRToneMappingCPU(frame, filteredCPU, exposure, gamma, saturation);
+        }
+        else
+        {
+            cuda_filter::applyFilterCPU(frame, filteredCPU, kernel);
+        }
         const double cpuEnd = static_cast<double>(cv::getTickCount());
         const double cpuTime = (cpuEnd - cpuStart) / cv::getTickFrequency();
         frameCountCPU++;
@@ -66,7 +85,14 @@ int main(int argc, char **argv)
 
         // Apply filter using GPU
         const double gpuStart = static_cast<double>(cv::getTickCount());
-        cuda_filter::applyFilterGPU(frame, filteredGPU, kernel);
+        if (filterType == cuda_filter::FilterType::HDR_TONEMAPPING)
+        {
+            cuda_filter::applyHDRToneMappingGPU(frame, filteredGPU, exposure, gamma, saturation, use_local);
+        }
+        else
+        {
+            cuda_filter::applyFilterGPU(frame, filteredGPU, kernel);
+        }
         const double gpuEnd = static_cast<double>(cv::getTickCount());
         const double gpuTime = (gpuEnd - gpuStart) / cv::getTickFrequency();
         frameCountGPU++;
@@ -77,11 +103,8 @@ int main(int argc, char **argv)
             startTimeGPU = gpuEnd;
         }
 
-        // Add FPS and processing time text to the frames
-        std::string cpuText = "CPU FPS: " + std::to_string(static_cast<int>(fpsCPU)) +
-                              " Time: " + std::to_string(cpuTime * 1000).substr(0, 4) + "ms";
-        std::string gpuText = "GPU FPS: " + std::to_string(static_cast<int>(fpsGPU)) +
-                              " Time: " + std::to_string(gpuTime * 1000).substr(0, 4) + "ms";
+        std::string cpuText = "Time: " + std::to_string(cpuTime * 1000).substr(0, 5) + " ms";
+        std::string gpuText = "Time: " + std::to_string(gpuTime * 1000).substr(0, 5) + " ms";
 
         cv::putText(filteredCPU, cpuText, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 0), 2);
         cv::putText(filteredGPU, gpuText, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 0), 2);
@@ -92,22 +115,32 @@ int main(int argc, char **argv)
         cv::putText(combined, "CPU Version", cv::Point(10, combined.rows - 10), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 0), 2);
         cv::putText(combined, "GPU Version", cv::Point(combined.cols / 2 + 10, combined.rows - 10), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 0), 2);
 
+
+        PLOG_INFO << "================ PERFORMANCE RESULTS ================";
+        PLOG_INFO << "CPU Time: " << cpuText ;
+        PLOG_INFO << "GPU Time: " << gpuText ;
+        PLOG_INFO << "=====================================================";
+
+        cv::imwrite("/content/hdr_result_cpu.png", filteredCPU);
+        cv::imwrite("/content/hdr_result_gpu.png", filteredGPU);
+
         // Display the combined result
-        if (options.preview)
-        {
-            inputHandler.displaySideBySide(frame, combined);
-        }
-        else
-        {
-            inputHandler.displayFrame(combined);
-        }
+        // if (options.preview)
+        // {
+        //     inputHandler.displaySideBySide(frame, combined);
+        // }
+        // else
+        // {
+        //     inputHandler.displayFrame(combined);
+        // }
 
         // Exit on ESC key
-        if (cv::waitKey(1) == 27)
-        {
-            break;
-        }
-    }
+        // if (cv::waitKey(1) == 27)
+        // {
+        //     break;
+        // }
+
+
 
     PLOG_INFO << "Application terminated";
     return 0;

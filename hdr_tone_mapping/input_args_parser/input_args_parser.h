@@ -32,6 +32,11 @@ namespace cuda_filter
         float sigma;
         float intensity;
         bool preview;
+
+        float exposure;
+        float gamma;
+        float saturation;
+        bool useLocal;
     };
 
     class InputArgsParser

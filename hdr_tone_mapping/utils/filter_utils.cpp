@@ -15,6 +15,9 @@ namespace cuda_filter
             return FilterType::EDGE_DETECTION;
         if (filterName == "emboss")
             return FilterType::EMBOSS;
+        if (filterName == "hdr")
+            return FilterType::HDR_TONEMAPPING;
+
 
         PLOG_WARNING << "Unknown filter type: " << filterName << ". Using default blur filter.";
         return FilterType::BLUR;
@@ -80,6 +83,10 @@ namespace cuda_filter
             }
             break;
 
+        case FilterType::HDR_TONEMAPPING:
+            kernel = cv::Mat::zeros(1, 1, CV_32F);
+            break;
+
         case FilterType::IDENTITY:
         default:
             kernel = cv::Mat::zeros(kernelSize, kernelSize, CV_32F);
@@ -95,4 +102,4 @@ namespace cuda_filter
         cv::filter2D(input, output, -1, kernel);
     }
 
-} // namespace cuda_filter
+}

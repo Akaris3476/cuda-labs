@@ -8,6 +8,12 @@ namespace cuda_filter
     void applyFilterGPU(const cv::Mat &input, cv::Mat &output, const cv::Mat &kernel);
     void applyFilterCPU(const cv::Mat &input, cv::Mat &output, const cv::Mat &kernel);
 
+    void applyHDRToneMappingGPU(const cv::Mat &input, cv::Mat &output,
+                                float exposure, float gamma, float saturation, bool use_local);
+
+    void applyHDRToneMappingCPU(const cv::Mat &input, cv::Mat &output,
+                                float exposure, float gamma, float saturation);
+
     namespace cuda
     {
 // CUDA-specific type declarations and helper functions
